@@ -1,15 +1,12 @@
-import {
-  Assets,
-  Border,
-  colors,
-  ListHeader,
-  ListRow,
-  NavigationBar,
-  SelectBottomSheet,
-  Spacing,
-  Tab,
-  TextField,
-} from 'tosslib';
+import { SavingsProduct } from 'apis/types';
+import { Tab } from 'components/Tab';
+import { Filter, useFilter } from 'features/Filter';
+
+import { useFetch } from 'hooks/useFetch';
+import { SelectProduct, useSelectProduct } from 'providers/SelectProduct';
+
+import { Assets, Border, colors, ListHeader, ListRow, NavigationBar, Spacing } from 'tosslib';
+import { formatCurrency } from 'utils/formatCurrency';
 
 export function SavingsCalculatorPage() {
   return (
@@ -18,58 +15,33 @@ export function SavingsCalculatorPage() {
 
       <Spacing size={16} />
 
-      <TextField label="목표 금액" placeholder="목표 금액을 입력하세요" suffix="원" />
-      <Spacing size={16} />
-      <TextField label="월 납입액" placeholder="희망 월 납입액을 입력하세요" suffix="원" />
-      <Spacing size={16} />
-      <SelectBottomSheet label="저축 기간" title="저축 기간을 선택해주세요" value={12} onChange={() => {}}>
-        <SelectBottomSheet.Option value={6}>6개월</SelectBottomSheet.Option>
-        <SelectBottomSheet.Option value={12}>12개월</SelectBottomSheet.Option>
-        <SelectBottomSheet.Option value={24}>24개월</SelectBottomSheet.Option>
-      </SelectBottomSheet>
+      <Filter>
+        <Spacing size={24} />
+        <Border height={16} />
+        <Spacing size={8} />
 
-      <Spacing size={24} />
-      <Border height={16} />
-      <Spacing size={8} />
-
-      <Tab onChange={() => {}}>
-        <Tab.Item value="products" selected={true}>
-          적금 상품
-        </Tab.Item>
-        <Tab.Item value="results" selected={false}>
-          계산 결과
-        </Tab.Item>
-      </Tab>
-
-      <ListRow
-        contents={
-          <ListRow.Texts
-            type="3RowTypeA"
-            top={'기본 정기적금'}
-            topProps={{ fontSize: 16, fontWeight: 'bold', color: colors.grey900 }}
-            middle={'연 이자율: 3.2%'}
-            middleProps={{ fontSize: 14, color: colors.blue600, fontWeight: 'medium' }}
-            bottom={'100,000원 ~ 500,000원 | 12개월'}
-            bottomProps={{ fontSize: 13, color: colors.grey600 }}
-          />
-        }
-        right={<Assets.Icon name="icon-check-circle-green" />}
-        onClick={() => {}}
-      />
-      <ListRow
-        contents={
-          <ListRow.Texts
-            type="3RowTypeA"
-            top={'고급 정기적금'}
-            topProps={{ fontSize: 16, fontWeight: 'bold', color: colors.grey900 }}
-            middle={'연 이자율: 2.8%'}
-            middleProps={{ fontSize: 14, color: colors.blue600, fontWeight: 'medium' }}
-            bottom={'50,000원 ~ 1,000,000원 | 24개월'}
-            bottomProps={{ fontSize: 13, color: colors.grey600 }}
-          />
-        }
-        onClick={() => {}}
-      />
+        <Tab
+          items={[
+            { value: 'products', label: '적금상품' },
+            { value: 'results', label: '계산 결과' },
+          ]}
+        >
+          {currentTab => (
+            <SelectProduct>
+              {(() => {
+                switch (currentTab) {
+                  case 'products': {
+                    return <ProductList />;
+                  }
+                  case 'results': {
+                    return <ResultList />;
+                  }
+                }
+              })()}
+            </SelectProduct>
+          )}
+        </Tab>
+      </Filter>
 
       {/* 아래는 계산 결과 탭 내용이에요. 계산 결과 탭을 구현할 때 주석을 해제해주세요. */}
       {/* <Spacing size={8} />
@@ -151,3 +123,133 @@ export function SavingsCalculatorPage() {
     </>
   );
 }
+
+const ProductList = () => {
+  const { data } = useFetch<SavingsProduct[]>('get', '/api/savings-products');
+  const filter = useFilter();
+  const { checkedItem, setCheckedItem } = useSelectProduct();
+
+  return (
+    <>
+      {data
+        ?.filter(
+          item =>
+            (filter.monthlyPay === '' ||
+              (filter.monthlyPay > item.minMonthlyAmount && filter.monthlyPay < item.maxMonthlyAmount)) &&
+            filter.depositPeriod === item.availableTerms
+        )
+        .map(savingsProduct => (
+          <ListRow
+            key={savingsProduct.id}
+            contents={
+              <ListRow.Texts
+                type="3RowTypeA"
+                top={savingsProduct.name}
+                topProps={{ fontSize: 16, fontWeight: 'bold', color: colors.grey900 }}
+                middle={`연 이자율: ${savingsProduct.annualRate}%`}
+                middleProps={{ fontSize: 14, color: colors.blue600, fontWeight: 'medium' }}
+                bottom={`${formatCurrency(savingsProduct.minMonthlyAmount)} ~ ${formatCurrency(savingsProduct.maxMonthlyAmount)} | ${savingsProduct.availableTerms}개월`}
+                bottomProps={{ fontSize: 13, color: colors.grey600 }}
+              />
+            }
+            right={checkedItem === savingsProduct.id && <Assets.Icon name="icon-check-circle-green" />}
+            onClick={() => {
+              setCheckedItem(savingsProduct.id);
+            }}
+          />
+        ))}
+    </>
+  );
+};
+
+const ResultList = () => {
+  const { data } = useFetch<SavingsProduct[]>('get', '/api/savings-products');
+  const filter = useFilter();
+  const { checkedItem, setCheckedItem } = useSelectProduct();
+  const result = data?.find(item => checkedItem === item.id);
+
+  if (!checkedItem || !result) {
+    return <ListRow contents={<ListRow.Texts type="1RowTypeA" top="상품을 선택해주세요." />} />;
+  }
+
+  const estimatedProfit = filter.depositPeriod * (filter.monthlyPay || 0) * (1 + result.annualRate * 0.5);
+  const recommendProduct = data
+    ?.filter(
+      item =>
+        (filter.monthlyPay === '' ||
+          (filter.monthlyPay > item.minMonthlyAmount && filter.monthlyPay < item.maxMonthlyAmount)) &&
+        filter.depositPeriod === item.availableTerms
+    )
+    .sort((a, b) => b.annualRate - a.annualRate)
+    .slice(0, 2);
+
+  return (
+    <>
+      <Spacing size={8} />
+
+      <ListRow
+        contents={
+          <ListRow.Texts
+            type="2RowTypeA"
+            top="예상 수익 금액"
+            topProps={{ color: colors.grey600 }}
+            bottom={formatCurrency(estimatedProfit)}
+            bottomProps={{ fontWeight: 'bold', color: colors.blue600 }}
+          />
+        }
+      />
+      <ListRow
+        contents={
+          <ListRow.Texts
+            type="2RowTypeA"
+            top="목표 금액과의 차이"
+            topProps={{ color: colors.grey600 }}
+            bottom={formatCurrency((filter.goalAmount || 0) - estimatedProfit)}
+            bottomProps={{ fontWeight: 'bold', color: colors.blue600 }}
+          />
+        }
+      />
+      <ListRow
+        contents={
+          <ListRow.Texts
+            type="2RowTypeA"
+            top="추천 월 납입 금액"
+            topProps={{ color: colors.grey600 }}
+            bottom={formatCurrency((filter.goalAmount || 0) / (filter.depositPeriod * (1 + result.annualRate * 0.5)))}
+            bottomProps={{ fontWeight: 'bold', color: colors.blue600 }}
+          />
+        }
+      />
+
+      <Spacing size={8} />
+      <Border height={16} />
+      <Spacing size={8} />
+
+      <ListHeader title={<ListHeader.TitleParagraph fontWeight="bold">추천 상품 목록</ListHeader.TitleParagraph>} />
+      <Spacing size={12} />
+
+      {recommendProduct?.map(savingsProduct => (
+        <ListRow
+          key={savingsProduct.id}
+          contents={
+            <ListRow.Texts
+              type="3RowTypeA"
+              top={savingsProduct.name}
+              topProps={{ fontSize: 16, fontWeight: 'bold', color: colors.grey900 }}
+              middle={`연 이자율: ${savingsProduct.annualRate}%`}
+              middleProps={{ fontSize: 14, color: colors.blue600, fontWeight: 'medium' }}
+              bottom={`${formatCurrency(savingsProduct.minMonthlyAmount)} ~ ${formatCurrency(savingsProduct.maxMonthlyAmount)} | ${savingsProduct.availableTerms}개월`}
+              bottomProps={{ fontSize: 13, color: colors.grey600 }}
+            />
+          }
+          right={checkedItem === savingsProduct.id && <Assets.Icon name="icon-check-circle-green" />}
+          onClick={() => {
+            setCheckedItem(savingsProduct.id);
+          }}
+        />
+      ))}
+
+      <Spacing size={40} />
+    </>
+  );
+};
